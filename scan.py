@@ -30,6 +30,7 @@ from scrape_tournament import fetch_team_matches_in_tournament
 from scrape_match_lineup import fetch_match_minutes
 from scrape_player_history import fetch_player_history
 from classify import classify_player
+from age_analysis import estimate_u19_status
 
 MATCH_CACHE_PATH = Path("raw/match_minutes_cache.json")
 HISTORY_CACHE_PATH = Path("raw/player_history_cache.json")
@@ -119,6 +120,7 @@ def run() -> dict:
     all_fids = {fid for totals in raw_minutes.values() for fid in totals}
 
     classifications: dict = {}
+    histories: dict = {}
     for fid in all_fids:
         cache_key = str(fid)
         if cache_key in history_cache:
@@ -132,13 +134,16 @@ def run() -> dict:
                 history = []
             history_cache[cache_key] = history
         classifications[fid] = classify_player(history)
+        histories[fid] = history
     save_cache(HISTORY_CACHE_PATH, history_cache)
 
     seasons_out: dict = {}
     for (season, team_key), totals in raw_minutes.items():
+        report_year = int(season)
         players_out = []
         for fid, info in totals.items():
             cls = classifications[fid]
+            u19 = estimate_u19_status(histories[fid], report_year)
             players_out.append({
                 "profile_fiksId": fid,
                 "name": info["name"],
@@ -146,6 +151,10 @@ def run() -> dict:
                 "matches": info["matches"],
                 "classification": cls["classification"],
                 "detail": cls["detail"],
+                "is_u19": u19["is_u19"],
+                "u19_confidence": u19["confidence"],
+                "age_that_season": u19["age_that_season"],
+                "u19_detail": u19["detail"],
             })
         players_out.sort(key=lambda p: -p["minutes"])
 
@@ -155,9 +164,15 @@ def run() -> dict:
             by_classification[p["classification"]]["total_minutes"] += p["minutes"]
             by_classification[p["classification"]]["players"].append(p)
 
+        u19_players = [p for p in players_out if p["is_u19"]]
+
         seasons_out.setdefault(season, {})[team_key] = {
             "players": players_out,
             "by_classification": by_classification,
+            "u19": {
+                "total_minutes": sum(p["minutes"] for p in u19_players),
+                "players": u19_players,
+            },
             "grand_total_minutes": sum(p["minutes"] for p in players_out),
         }
 

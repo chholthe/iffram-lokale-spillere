@@ -68,6 +68,21 @@ def build_scope_report(state: dict, season: str, team_key: str) -> str:
             lines.append(f"  - _{p['detail']}_")
         lines.append("")
 
+    u19 = data["u19"]
+    lines.append("## 🟡 Spillere under 19 år brukt")
+    if u19["players"]:
+        pct = round(100 * u19["total_minutes"] / grand_total) if grand_total else 0
+        lines.append(f"**{u19['total_minutes']} min** ({pct}% av alle minutter), "
+                     f"{len(u19['players'])} spillere:")
+        for p in sorted(u19["players"], key=lambda p: -p["minutes"]):
+            confidence_note = " (anslått alder)" if p["u19_confidence"] == "estimated" else ""
+            lines.append(f"- **{p['name']}** — {p['minutes']} min, "
+                         f"{p['age_that_season']} år{confidence_note}")
+            lines.append(f"  - _{p['u19_detail']}_")
+    else:
+        lines.append("Ingen spillere under 19 år brukt denne sesongen.")
+    lines.append("")
+
     lines.append("## Forbehold og metode")
     lines.append(
         "- **Fødselsår/alder er ikke offentlig tilgjengelig** noe sted på fotball.no. "
@@ -92,6 +107,14 @@ def build_scope_report(state: dict, season: str, team_key: str) -> str:
     )
     lines.append(
         f"- **Larvik-klubber** (avtalt med klubben): {', '.join(sorted(set(LARVIK_CLUBS)))}."
+    )
+    lines.append(
+        "- **Under 19 år** avgjøres av samme «Alderskategori»-felt: en bekreftet "
+        "«Ungdom X år»-rad for nettopp denne sesongen brukes når den finnes og stemmer "
+        "med resten av forløpet, ellers anslås alderen ut fra siste kjente "
+        "ungdoms-alderskategori pluss antall år som har gått. Stemmer ikke en "
+        "«bekreftet» rad med forløpet ellers (avvik >3 år), mistenkes det å være en "
+        "feilregistrering hos fotball.no, og forløpet brukes i stedet."
     )
     if other_data:
         lines.append(
