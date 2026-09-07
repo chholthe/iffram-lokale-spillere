@@ -2,5 +2,4 @@ raw/
 state.json
 __pycache__/
 *.pyc
-report_a_lag.md
-report_fram2.md
+report_*.md
