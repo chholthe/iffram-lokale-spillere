@@ -1,9 +1,7 @@
 """
-Genererer to separate, lesbare rapporter (norsk, markdown) fra state.json
-(bygget av scan.py) — én for A-laget, én for Fram 2. Klassifisering
-(klubbtrent/larviks-spiller/annet) er den samme for en spiller uansett lag
-(den handler om karrierehistorikk), men MINUTTENE i hver rapport gjelder kun
-det aktuelle laget, ikke summert på tvers.
+Genererer lesbare rapporter (norsk, markdown) fra state.json (bygget av
+scan.py) — én per (sesong, lag)-kombinasjon. 2026 har både A-laget og Fram 2;
+2025 og 2024 har kun A-laget (se scan.py/config.py for hvorfor).
 
 Kjør: python3 report.py
 """
@@ -28,30 +26,28 @@ CLASS_ORDER = ["klubbtrent", "larviks_spiller", "annet", "ukjent"]
 OTHER_TEAM = {"a_lag": "fram2", "fram2": "a_lag"}
 
 
-def build_team_report(state: dict, team_key: str) -> str:
+def build_scope_report(state: dict, season: str, team_key: str) -> str:
+    data = state["seasons"][season][team_key]
     team_label = TEAMS[team_key]["label"]
     other_key = OTHER_TEAM[team_key]
+    other_data = state["seasons"].get(season, {}).get(other_key)
+    other_minutes_by_fid = ({p["profile_fiksId"]: p["minutes"] for p in other_data["players"]}
+                             if other_data else {})
     other_label = TEAMS[other_key]["label"]
 
-    team_players = [p for p in state["players"] if p["minutes_by_team"].get(team_key, 0) > 0]
-    team_players.sort(key=lambda p: -p["minutes_by_team"][team_key])
-    grand_total = sum(p["minutes_by_team"][team_key] for p in team_players)
+    grand_total = data["grand_total_minutes"]
 
-    by_classification: dict = {}
-    for p in team_players:
-        by_classification.setdefault(p["classification"], {"total_minutes": 0, "players": []})
-        by_classification[p["classification"]]["total_minutes"] += p["minutes_by_team"][team_key]
-        by_classification[p["classification"]]["players"].append(p)
-
-    lines = [f"# IF Fram {team_label} — klubbtrente og Larviks-spillere", "",
-             f"_Sesongen 2026. Basert på fotball.no sin sesonghistorikk per spiller "
-             f"(fødselsår er ikke offentlig tilgjengelig — se forbehold nederst)._", ""]
+    lines = [f"# IF Fram {team_label} {season} — klubbtrente og Larviks-spillere", "",
+             f"_Sesongen {season}. \"Egenutviklet spiller\" følger NFFs definisjon: en "
+             f"spiller klubben selv har hatt og utviklet fra vedkommende var 15 år. "
+             f"Basert på fotball.no sin sesonghistorikk per spiller (fødselsår er ikke "
+             f"offentlig tilgjengelig — se forbehold nederst)._", ""]
 
     lines.append("## Sammendrag")
-    lines.append(f"**Totalt {grand_total} minutter spilt** for {team_label} denne sesongen, "
-                 f"fordelt på {len(team_players)} spillere:")
+    lines.append(f"**Totalt {grand_total} minutter spilt** for {team_label} sesongen {season}, "
+                 f"fordelt på {len(data['players'])} spillere:")
     for cls in CLASS_ORDER:
-        info = by_classification.get(cls)
+        info = data["by_classification"].get(cls)
         if not info:
             continue
         pct = round(100 * info["total_minutes"] / grand_total) if grand_total else 0
@@ -60,16 +56,15 @@ def build_team_report(state: dict, team_key: str) -> str:
     lines.append("")
 
     for cls in CLASS_ORDER:
-        info = by_classification.get(cls)
+        info = data["by_classification"].get(cls)
         if not info:
             continue
         lines.append(f"## {CLASS_LABELS[cls]}")
         lines.append("")
         for p in info["players"]:
-            minutes_this_team = p["minutes_by_team"][team_key]
-            other_minutes = p["minutes_by_team"].get(other_key, 0)
+            other_minutes = other_minutes_by_fid.get(p["profile_fiksId"], 0)
             extra = f" (har også {other_minutes} min for {other_label} denne sesongen)" if other_minutes else ""
-            lines.append(f"- **{p['name']}** — {minutes_this_team} min{extra}")
+            lines.append(f"- **{p['name']}** — {p['minutes']} min{extra}")
             lines.append(f"  - _{p['detail']}_")
         lines.append("")
 
@@ -92,29 +87,40 @@ def build_team_report(state: dict, team_key: str) -> str:
     )
     lines.append(
         f"- **Minutter** er beregnet fra kamptidslinjen (start/bytt inn/bytt ut/rødt "
-        f"kort) for alle spilte serie- og cupkamper {team_label} har spilt denne "
-        f"sesongen — treningskamper telles ikke med. Antar 90 minutters kamplengde."
+        f"kort) for alle spilte serie- og cupkamper {team_label} spilte sesongen "
+        f"{season} — treningskamper telles ikke med. Antar 90 minutters kamplengde."
     )
     lines.append(
         f"- **Larvik-klubber** (avtalt med klubben): {', '.join(sorted(set(LARVIK_CLUBS)))}."
     )
-    lines.append(
-        f"- Denne rapporten viser KUN minutter for {team_label}. Spillere som også har "
-        f"spilt for {other_label} denne sesongen er notert med det, men de minuttene "
-        f"telles ikke med her — se den andre lagets rapport for de tallene."
-    )
+    if other_data:
+        lines.append(
+            f"- Denne rapporten viser KUN minutter for {team_label}. Spillere som også "
+            f"har spilt for {other_label} denne sesongen er notert med det, men de "
+            f"minuttene telles ikke med her — se den andre lagets rapport for de tallene."
+        )
+    if season != "2026":
+        lines.append(
+            f"- Kamper for sesongen {season} er hentet fra den historiske turneringens "
+            f"fulle terminliste (lagets egen side viser kun inneværende sesong). "
+            f"Fram 2 er ikke inkludert for dette året."
+        )
 
     return "\n".join(lines)
 
 
 def build_reports(state: dict) -> dict:
-    return {team_key: build_team_report(state, team_key) for team_key in TEAMS}
+    reports = {}
+    for season, teams in state["seasons"].items():
+        for team_key in teams:
+            reports[(season, team_key)] = build_scope_report(state, season, team_key)
+    return reports
 
 
 if __name__ == "__main__":
     state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
     reports = build_reports(state)
-    for team_key, report in reports.items():
-        out_path = Path(f"report_{team_key}.md")
+    for (season, team_key), report in reports.items():
+        out_path = Path(f"report_{team_key}_{season}.md")
         out_path.write_text(report, encoding="utf-8")
         print(f"Skrev {out_path}")
